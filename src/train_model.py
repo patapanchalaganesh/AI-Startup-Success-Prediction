@@ -1,15 +1,15 @@
 import pandas as pd
 import numpy as np
 import os
-import joblib
+import pickle
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def train_startup_model():
     print("--- Step 2: Training Machine Learning Model ---")
@@ -40,17 +40,20 @@ def train_startup_model():
     )
 
     X_train_prep = preprocessor.fit_transform(X_train)
-    X_test_prep = preprocessor.transform(X_test)
 
     model = LogisticRegression(max_iter=1000, random_state=42)
     model.fit(X_train_prep, y_train)
 
-    # Save artifacts into models/
-    joblib.dump(model, os.path.join(model_dir, 'user_best_model.pkl'))
-    joblib.dump(preprocessor, os.path.join(model_dir, 'user_preprocessor.pkl'))
+    # Save artifacts into models/ using standard built-in pickle
+    with open(os.path.join(model_dir, 'user_best_model.pkl'), 'wb') as f:
+        pickle.dump(model, f)
 
-    print(f"Model trained and saved successfully to '{model_dir}'!")
+    with open(os.path.join(model_dir, 'user_preprocessor.pkl'), 'wb') as f:
+        pickle.dump(preprocessor, f)
+
+    print(f"Model trained and saved successfully with standard pickle to '{model_dir}'!")
     return model, preprocessor
+
 
 if __name__ == "__main__":
     train_startup_model()

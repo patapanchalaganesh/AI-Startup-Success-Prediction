@@ -2,15 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import pickle
 import plotly.graph_objects as go
 
-# Safe import for joblib (supports standalone joblib or sklearn internal joblib)
-try:
-    import joblib
-except ImportError:
-    from sklearn.utils import _joblib as joblib
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 st.set_page_config(page_title="AI Startup Success Predictor", page_icon="🚀", layout="wide")
 
@@ -29,37 +24,54 @@ st.markdown("""
 
 @st.cache_resource
 def load_assets():
-    model_path = os.path.join(BASE_DIR, 'models', 'user_best_model.pkl')
-    prep_path = os.path.join(BASE_DIR, 'models', 'user_preprocessor.pkl')
+    possible_models = [
+        os.path.join(BASE_DIR, 'models', 'user_best_model.pkl'),
+        os.path.join(BASE_DIR, '..', 'models', 'user_best_model.pkl'),
+        'models/user_best_model.pkl',
+        'user_best_model.pkl'
+    ]
+    possible_preps = [
+        os.path.join(BASE_DIR, 'models', 'user_preprocessor.pkl'),
+        os.path.join(BASE_DIR, '..', 'models', 'user_preprocessor.pkl'),
+        'models/user_preprocessor.pkl',
+        'user_preprocessor.pkl'
+    ]
 
-    if not os.path.exists(model_path) or not os.path.exists(prep_path):
-        model_path = 'models/user_best_model.pkl'
-        prep_path = 'models/user_preprocessor.pkl'
+    model_path = next((p for p in possible_models if os.path.exists(p)), None)
+    prep_path = next((p for p in possible_preps if os.path.exists(p)), None)
 
-    model = joblib.load(model_path)
-    preprocessor = joblib.load(prep_path)
+    if not model_path or not prep_path:
+        raise FileNotFoundError("Model or preprocessor file not found in models/ folder!")
+
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+
+    with open(prep_path, 'rb') as f:
+        preprocessor = pickle.load(f)
 
     possible_csvs = [
         os.path.join(BASE_DIR, 'data', 'startup_funding.csv'),
+        os.path.join(BASE_DIR, '..', 'data', 'startup_funding.csv'),
         os.path.join(BASE_DIR, 'data', 'indian_startup_funding.csv'),
         'data/startup_funding.csv',
         'data/indian_startup_funding.csv',
         'startup_funding.csv'
     ]
-    csv_path = None
-    for p in possible_csvs:
-        if os.path.exists(p):
-            csv_path = p
-            break
+    csv_path = next((p for p in possible_csvs if os.path.exists(p)), None)
+    if not csv_path:
+        raise FileNotFoundError("Dataset CSV file not found in data/ folder!")
 
     df = pd.read_csv(csv_path)
+    df.columns = df.columns.str.strip()  # Strip whitespace from columns
     return model, preprocessor, df
 
 
+# Asset Loading Execution
 try:
     model, preprocessor, raw_df = load_assets()
     assets_loaded = True
 except Exception as e:
+    model, preprocessor, raw_df = None, None, pd.DataFrame()
     assets_loaded = False
 
 st.title("🚀 AI Startup Success Predictor App")
@@ -68,14 +80,16 @@ st.markdown("Predict **5-Year Survival & Growth Probability** of Indian startups
 st.markdown("---")
 
 if not assets_loaded:
-    st.error("⚠️ Model files missing! Please run `python src/train_model.py` first.")
+    st.error(
+        "⚠️ Model files or dataset missing! Please right-click `src/train_model.py` and click Run in PyCharm first.")
     st.stop()
 
+# Helper function for investor score
 top_investors = ['Sequoia', 'SoftBank', 'Tiger Global', 'Accel', 'SAIF Partners', 'Naspers', 'Matrix', 'Blume']
 
 
 def get_inv_score(inv_str):
-    if not inv_str: return 1.0
+    if not inv_str or pd.isna(inv_str): return 1.0
     score = 1.0
     for top in top_investors:
         if top.lower() in str(inv_str).lower(): score += 2.0
@@ -87,31 +101,38 @@ mode = st.sidebar.radio("Choose Mode:", ["Select Real Startup", "Custom Startup 
 
 if mode == "Select Real Startup":
     st.subheader("🏢 Select Startup from Dataset")
-    startup_list = sorted(raw_df['Startup Name'].dropna().unique())
+
+    # Safely locate the startup name column
+    name_col = 'Startup Name' if 'Startup Name' in raw_df.columns else raw_df.columns[2]
+    startup_list = sorted(raw_df[name_col].dropna().astype(str).unique())
+
     selected = st.selectbox("Choose a Startup:", startup_list)
-    row = raw_df[raw_df['Startup Name'] == selected].iloc[0]
+    row = raw_df[raw_df[name_col] == selected].iloc[0]
+
+    sec_val = str(row.get('Industry Vertical', 'Technology'))
+    loc_val = str(row.get('City  Location', 'Bengaluru'))
+    amt_val = str(row.get('Amount in USD', '5000000'))
+    inv_val = str(row.get('Investors Name', 'Sequoia'))
+    typ_val = str(row.get('InvestmentnType', 'Series A'))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Startup", str(row['Startup Name']))
-    c2.metric("Sector", str(row['Industry Vertical']))
-    c3.metric("Location", str(row['City  Location']))
-    c4.metric("Funding", str(row['Amount in USD']))
+    c1.metric("Startup", selected)
+    c2.metric("Sector", sec_val)
+    c3.metric("Location", loc_val)
+    c4.metric("Funding", amt_val)
 
-    amount_raw = str(row['Amount in USD']).replace(',', '').replace('$', '')
+    amount_raw = amt_val.replace(',', '').replace('$', '').strip()
     try:
         funding_val = float(amount_raw)
     except:
         funding_val = 5000000.0
 
-    inv_score = get_inv_score(str(row['Investors Name']))
-    city_str = str(row['City  Location'])
-    clean_city = 'Bengaluru' if 'Bengaluru' in city_str else (
-        'Delhi NCR' if any(c in city_str for c in ['Gurgaon', 'Delhi', 'Noida']) else 'Mumbai')
-    ind_str = str(row['Industry Vertical'])
-    clean_ind = 'E-Commerce & EdTech' if any(w in ind_str for w in ['E-Commerce', 'EdTech']) else (
-        'FinTech & Finance' if 'Fin' in ind_str else 'SaaS & Tech')
-    type_str = str(row['InvestmentnType'])
-    clean_inv_type = 'Series A-D' if 'Series' in type_str else 'Seed / Pre-Series A'
+    inv_score = get_inv_score(inv_val)
+    clean_city = 'Bengaluru' if 'Bengaluru' in loc_val else (
+        'Delhi NCR' if any(c in loc_val for c in ['Gurgaon', 'Delhi', 'Noida']) else 'Mumbai')
+    clean_ind = 'E-Commerce & EdTech' if any(w in sec_val for w in ['E-Commerce', 'EdTech']) else (
+        'FinTech & Finance' if 'Fin' in sec_val else 'SaaS & Tech')
+    clean_inv_type = 'Series A-D' if 'Series' in typ_val else 'Seed / Pre-Series A'
 
     input_df = pd.DataFrame([{
         'Amount_USD': funding_val,
