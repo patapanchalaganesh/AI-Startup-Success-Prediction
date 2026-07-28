@@ -1,24 +1,50 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
 import os
 import plotly.graph_objects as go
+
+# Safe import for joblib (supports standalone joblib or sklearn internal joblib)
+try:
+    import joblib
+except ImportError:
+    from sklearn.utils import _joblib as joblib
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 st.set_page_config(page_title="AI Startup Success Predictor", page_icon="🚀", layout="wide")
 
+# Custom Styling
+st.markdown("""
+    <style>
+    .main { background-color: #0f172a; color: #f8fafc; }
+    .stMetric { background: rgba(30, 41, 59, 0.7); border-radius: 12px; padding: 15px; }
+    .stButton>button {
+        background: linear-gradient(135deg, #f97316 0%, #dc2626 100%);
+        color: white; font-weight: bold; border-radius: 8px; height: 50px; width: 100%; border: none;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 
 @st.cache_resource
 def load_assets():
-    model = joblib.load(os.path.join(BASE_DIR, 'models', 'user_best_model.pkl'))
-    preprocessor = joblib.load(os.path.join(BASE_DIR, 'models', 'user_preprocessor.pkl'))
+    model_path = os.path.join(BASE_DIR, 'models', 'user_best_model.pkl')
+    prep_path = os.path.join(BASE_DIR, 'models', 'user_preprocessor.pkl')
+
+    if not os.path.exists(model_path) or not os.path.exists(prep_path):
+        model_path = 'models/user_best_model.pkl'
+        prep_path = 'models/user_preprocessor.pkl'
+
+    model = joblib.load(model_path)
+    preprocessor = joblib.load(prep_path)
 
     possible_csvs = [
         os.path.join(BASE_DIR, 'data', 'startup_funding.csv'),
         os.path.join(BASE_DIR, 'data', 'indian_startup_funding.csv'),
-        os.path.join(BASE_DIR, 'startup_funding.csv')
+        'data/startup_funding.csv',
+        'data/indian_startup_funding.csv',
+        'startup_funding.csv'
     ]
     csv_path = None
     for p in possible_csvs:
